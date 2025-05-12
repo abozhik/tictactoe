@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tic Tac Toe</title>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.0/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+        .game-container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        .board {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            margin: 20px 0;
+        }
+        .cell {
+            aspect-ratio: 1;
+            background: #f0f0f0;
+            border: 1px solid #ccc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2em;
+            cursor: pointer;
+        }
+        .cell:hover {
+            background: #e0e0e0;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8" x-data="gameApp()" x-init="loadGames()">
+        <div class="max-w-6xl mx-auto">
+            <h1 class="text-3xl font-bold mb-8 text-center">Tic Tac Toe</h1>
+            
+            <!-- Game Controls -->
+            <div class="mb-8 flex justify-center" x-show="currentGame">
+                <button @click="createNewGame()" 
+                        class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg shadow">
+                    New Game
+                </button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <!-- Game Board -->
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <template x-if="currentGame">
+                        <div>
+                            <h2 class="text-xl font-semibold mb-4" x-text="'Game #' + currentGame.id"></h2>
+                            <div class="mb-4 p-4 bg-gray-50 rounded" x-text="`Status: ${currentGame.status}, Current Player: ${currentGame.currentPlayer}`"></div>
+                            
+                            <div class="grid grid-cols-3 gap-2 aspect-square max-w-md mx-auto">
+                                <template x-for="(cell, index) in 9" :key="index">
+                                    <div @click="canMakeMove() && currentGame.board[index] === ' ' && makeMove(index)"
+                                         class="bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded flex items-center justify-center text-4xl font-bold aspect-square"
+                                         :class="{
+                                             'cursor-pointer': canMakeMove() && currentGame.board[index] === ' ',
+                                             'cursor-not-allowed opacity-75': !canMakeMove() || currentGame.board[index] !== ' '
+                                         }"
+                                         x-text="currentGame.board[index] === ' ' ? '' : currentGame.board[index]">
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="!currentGame">
+                        <div class="text-center py-8">
+                            <p class="text-gray-500 mb-4">No active game</p>
+                            <button @click="createNewGame()" 
+                                    class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg shadow">
+                                Start New Game
+                            </button>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Game History -->
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h2 class="text-xl font-semibold mb-4">Game History</h2>
+                    <div class="space-y-4">
+                        <template x-for="game in games" :key="game.id">
+                            <div class="border rounded p-4 hover:bg-gray-50 cursor-pointer"
+                                 @click="selectGame(game)">
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <span class="font-medium" x-text="'Game #' + game.id"></span>
+                                        <span class="text-sm text-gray-500 ml-2" x-text="formatDate(game.creationDateTime)"></span>
+                                    </div>
+                                    <span class="px-2 py-1 rounded text-sm"
+                                          :class="{
+                                              'bg-green-100 text-green-800': game.status === 'X_WON' || game.status === 'O_WON',
+                                              'bg-yellow-100 text-yellow-800': game.status === 'IN_PROGRESS',
+                                              'bg-gray-100 text-gray-800': game.status === 'DRAW'
+                                          }"
+                                          x-text="game.status">
+                                    </span>
+                                </div>
+
+                                <!--<div class="mt-2 grid grid-cols-3 gap-1 max-w-[200px]">
+                                    <template x-for="(cell, index) in 9" :key="index">
+                                        <div class="bg-gray-100 border border-gray-200 rounded flex items-center justify-center text-sm aspect-square"
+                                             x-text="game.board[index] === ' ' ? '' : game.board[index]">
+                                        </div>
+                                    </template>
+                                </div>-->
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function gameApp() {
+            return {
+                games: [],
+                currentGame: null,
+                stompClient: null,
+
+                loadGames() {
+                    fetch('/api/game')
+                        .then(response => response.json())
+                        .then(games => {
+                            this.games = games;
+                        })
+                        .catch(error => console.error('Error loading games:', error));
+                },
+
+                createNewGame() {
+                    fetch('/api/game/new', {
+                        method: 'POST'
+                    })
+                    .then(response => response.json())
+                    .then(game => {
+                        this.currentGame = game;
+                        this.connectWebSocket(game.id);
+                        this.loadGames();
+                    })
+                    .catch(error => console.error('Error creating game:', error));
+                },
+
+                makeMove(position) {
+                    if (!this.currentGame || !this.canMakeMove()) return;
+
+                    const moveRequest = {
+                        position: position,
+                        requestId: `move-${Date.now()}`,
+                        player: this.currentGame.currentPlayer
+                    };
+
+                    fetch(`/api/game/${this.currentGame.id}/move`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(moveRequest)
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Move failed');
+                        }
+                        // The WebSocket subscription will handle the UI update
+                    })
+                    .catch(error => {
+                        console.error('Error making move:', error);
+                    });
+                },
+
+                canMakeMove() {
+                    return this.currentGame && this.currentGame.status === 'IN_PROGRESS';
+                },
+
+                selectGame(game) {
+                    fetch(`/api/game/${game.id}`, {
+                        method: 'GET'
+                    })
+                    .then(response => response.json())
+                    .then(g => {
+                        this.currentGame = g;
+                        this.connectWebSocket(game.id);
+                    })
+                    .catch(error => console.error('Error getting the game:', error));
+                },
+
+                connectWebSocket(gameId) {
+                    if (this.stompClient) {
+                        this.stompClient.disconnect();
+                    }
+
+                    const socket = new SockJS('/ws');
+                    this.stompClient = Stomp.over(socket);
+                    
+                    this.stompClient.connect({}, frame => {
+                        console.log('Connected to WebSocket');
+                        
+                        // Subscribe to game updates
+                        this.stompClient.subscribe(`/topic/game/${gameId}`, message => {
+                            const game = JSON.parse(message.body);
+                            this.currentGame = game;
+                            this.loadGames();
+                        });
+
+                        // Subscribe to errors
+                        this.stompClient.subscribe('/topic/errors', message => {
+                            console.error('WebSocket error:', message.body);
+                        });
+                    }, error => {
+                        console.error('WebSocket connection error:', error);
+                    });
+                },
+
+                formatDate(dateString) {
+                    return new Date(dateString).toLocaleString();
+                }
+            }
+        }
+    </script>
+</body>
+</html> 
